@@ -2,6 +2,7 @@ import { type EntityManager, type MikroORM } from '@mikro-orm/sqlite'
 import { DateTimeRange } from '@3mo/date-time'
 import { Source } from '#features/sources'
 import { Entry } from '#features/entries'
+import type { TimeZone } from '#features/time/TimeZone.js'
 import { EntryOccurrences, type EntryOccurrence } from '#features/recurrence'
 import '#features/time/TimeSpan.time.js'
 import { Integration } from '#integrations'
@@ -11,6 +12,7 @@ import { State } from '#infrastructure/database/State.js'
 import { DueReminder } from '../Reminders.js'
 import { NotificationSubscription } from '../NotificationSubscription.js'
 import { sendTo } from './push.js'
+import { reminderEmail } from './email.js'
 
 /**
  * Periodic reminder tick scheduler. Scans upcoming reminders in `(watermark, now + interval]` window,
@@ -109,7 +111,7 @@ export class ReminderScheduler {
 					continue
 				}
 				this.dispatched.set(key, reminder.fireAt)
-				this.schedule(userId, reminder, now.getTime())
+				this.schedule(userId, reminder, now.getTime(), zoneOf(reminder.occurrence))
 			}
 
 			// Advance watermark only to `now` so unexecuted timers in `(now, until]` remain recoverable on crash.
@@ -127,12 +129,13 @@ export class ReminderScheduler {
 	}
 
 	/** Schedule exact timer for reminder delivery. */
-	private schedule(userId: string, reminder: DueReminder, now: number) {
+	private schedule(userId: string, reminder: DueReminder, now: number, timeZone?: TimeZone) {
 		const { occurrence: { entry }, minutes, fireAt } = reminder
 		const notification = reminder.notification()
 		const send = () => {
 			this.logger.info(`Reminder: "${entry.heading}" ${minutes ? `in ${TimeSpan.fromMinutes(minutes).formatAsWholeUnit(localizeIn('en'))}` : 'now'}`)
 			sendTo(userId, notification).catch(error => this.logger.warn('Reminder delivery failed:', error instanceof Error ? error.message : error))
+			void reminderEmail.send(notification, { timeZone, notes: entry.description })
 		}
 		const delay = fireAt - now
 		if (delay <= 0) {
