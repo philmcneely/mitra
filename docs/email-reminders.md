@@ -21,7 +21,7 @@ Set these environment variables on the server. Email is on once a host and at le
 | `MITRA_SMTP_FROM` | the user | The sender, for example `Mitra <you@example.com>`. |
 | `MITRA_REMINDER_EMAILS` | | Who gets the mail: addresses separated by commas. Required. |
 
-Mitra has one account here, so every reminder goes to every address listed: one message to all of them. Anything in the list that isn't an address is ignored.
+This is meant for an instance with one account, such as a family calendar: every reminder of every entry goes to every address listed, in one message. Don't use it on an instance with several people who each keep private entries. Messages are sent one at a time. Anything in the list that isn't an address is ignored.
 
 ```yaml
 environment:

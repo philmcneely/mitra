@@ -99,6 +99,14 @@ function anchorOf({ when }: ReminderFacts) {
 	return when === undefined ? undefined : when.due ? when.end : when.start ?? when.end
 }
 
+const ReminderEmailLink = {
+	/** The address of `path` on the instance, none if it would lead anywhere else. */
+	of(path: string, base: URL) {
+		const link = new URL(path, base)
+		return link.origin === base.origin ? link.toString() : undefined
+	},
+}
+
 /** The subject, the text and the HTML of a reminder, with the time read in the reader's zone. */
 export function composeReminderEmail(notification: ReminderNotification, options: ComposeOptions = {}) {
 	const { facts } = notification
@@ -131,7 +139,7 @@ export function composeReminderEmail(notification: ReminderNotification, options
 
 	const notes = options.notes?.replace(/\r\n?/g, '\n').trim()
 	const shortNotes = notes ? notes.length > NOTES_MAX ? `${notes.slice(0, NOTES_MAX)}…` : notes : undefined
-	const link = options.url ? new URL(notification.for({ locale: 'en', timeZone }, now).url, options.url).toString() : undefined
+	const link = options.url ? ReminderEmailLink.of(notification.for({ locale: 'en', timeZone }, now).url, options.url) : undefined
 	const kind = facts.kind === 'task' ? 'Task' : 'Event'
 
 	const text = [
@@ -185,6 +193,8 @@ const PERMANENT = new Set(['EAUTH', 'EENVELOPE', 'EMESSAGE'])
 export class ReminderEmail {
 	private transport?: EmailTransport
 	private readonly log: Log
+	/** Mail goes one message at a time, so a burst of reminders is one connection after another, not a flood of them. */
+	private queue: Promise<void> = Promise.resolve()
 
 	constructor(private readonly config: EmailConfig | undefined, private readonly options: ReminderEmailOptions = {}) {
 		this.log = options.log ?? logger
@@ -199,12 +209,15 @@ export class ReminderEmail {
 	}
 
 	/** Mails the reminder if e-mail is on; never rejects, never tries more than twice. */
-	async send(notification: ReminderNotification, { timeZone, notes }: SendOptions) {
-		const { config } = this
-		if (!config) {
-			return
+	send(notification: ReminderNotification, options: SendOptions): Promise<void> {
+		if (!this.config) {
+			return Promise.resolve()
 		}
-		const heading = notification.facts.heading
+		return this.queue = this.queue.then(() => this.mail(this.config!, notification, options))
+	}
+
+	private async mail(config: EmailConfig, notification: ReminderNotification, { timeZone, notes }: SendOptions) {
+		const heading = oneLine(notification.facts.heading)
 		try {
 			const content = composeReminderEmail(notification, { timeZone: timeZone ?? this.options.defaultZone, notes, url: this.options.url })
 			const message: ReminderMessage = { from: config.from, to: [...config.recipients], ...content }

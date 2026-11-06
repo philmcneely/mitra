@@ -207,6 +207,21 @@ describe('ReminderEmail', () => {
 		assert.doesNotMatch(lines.join('\n'), /hunter2/)
 	})
 
+	it('sends one message at a time', async () => {
+		let running = 0
+		let peak = 0
+		const transport: EmailTransport = {
+			async sendMail() {
+				peak = Math.max(peak, ++running)
+				await new Promise(resolve => setTimeout(resolve, 5))
+				running--
+			},
+		}
+		const email = new ReminderEmail(config, { ...options(transport), log: logs().log })
+		await Promise.all([email.send(event(), {}), email.send(event(), {}), email.send(event(), {})])
+		assert.equal(peak, 1)
+	})
+
 	it('does not throw when composing fails', async () => {
 		const { transport } = recording()
 		await new ReminderEmail(config, { ...options(transport), log: logs().log }).send(event({ when: { start: Number.NaN } }), { timeZone: chicago })
